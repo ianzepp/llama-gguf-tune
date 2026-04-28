@@ -26,6 +26,7 @@ class ServerEvalResult:
     metrics: dict[str, Any]
     response: dict[str, Any]
     stderr: str
+    run_metadata: dict[str, Any] | None = None
 
     @property
     def generation_tps(self) -> float:
@@ -42,6 +43,7 @@ class ServerEvalResult:
             "metrics": self.metrics,
             "response": self.response,
             "stderr": self.stderr,
+            "run": self.run_metadata or {},
         }
 
 
@@ -118,6 +120,7 @@ def run_llama_server_eval(
     port: int | None = None,
     startup_timeout: float = 120.0,
     request_timeout: float = 60.0,
+    run_metadata: dict[str, Any] | None = None,
 ) -> ServerEvalResult:
     selected_port = port if port is not None else find_free_port(host)
     command = build_server_command(
@@ -165,6 +168,7 @@ def run_llama_server_eval(
         metrics=metrics,
         response=response,
         stderr=stderr,
+        run_metadata=run_metadata,
     )
 
 

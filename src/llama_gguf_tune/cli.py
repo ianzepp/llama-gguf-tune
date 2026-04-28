@@ -10,6 +10,7 @@ from .bench import create_run_dir, require_llama_bench, run_llama_bench, write_b
 from .candidates import default_candidates
 from .evals import discover_run_dirs, format_eval_table, select_latest_run_dirs, summarize_runs
 from .models import find_gguf_models, human_size
+from .run_metadata import capture_run_metadata, write_run_metadata
 from .server_eval import require_llama_server, run_llama_server_eval
 
 
@@ -93,6 +94,8 @@ def cmd_bench(args: argparse.Namespace) -> int:
     logical_cpus = os.cpu_count() or 1
     candidates = default_candidates(logical_cpus)[: args.limit]
     run_dir = create_run_dir(args.runs_dir.expanduser().resolve(), model)
+    run_metadata = capture_run_metadata()
+    write_run_metadata(run_dir, run_metadata)
     print(f"run_dir={run_dir}")
     print(f"candidates={len(candidates)}")
 
@@ -107,6 +110,7 @@ def cmd_bench(args: argparse.Namespace) -> int:
             repetitions=args.repetitions,
             prompt_tokens=args.prompt_tokens,
             gen_tokens=args.gen_tokens,
+            run_metadata=run_metadata,
         )
         results.append(result)
         if result.returncode == 0 and (best is None or result.generation_tps > best.generation_tps):
@@ -117,7 +121,7 @@ def cmd_bench(args: argparse.Namespace) -> int:
     if best is None:
         raise RuntimeError(f"all candidates failed; see {run_dir / 'run.jsonl'}")
 
-    profile_path = write_best_profile(run_dir, model, best)
+    profile_path = write_best_profile(run_dir, model, best, run_metadata)
     print(f"best_generation_tps={best.generation_tps:.3f}")
     print(f"best_profile={profile_path}")
     return 0
@@ -134,6 +138,8 @@ def cmd_server_eval(args: argparse.Namespace) -> int:
     logical_cpus = os.cpu_count() or 1
     candidates = default_candidates(logical_cpus)[: args.limit]
     run_dir = create_run_dir(args.runs_dir.expanduser().resolve(), model)
+    run_metadata = capture_run_metadata()
+    write_run_metadata(run_dir, run_metadata)
     print(f"run_dir={run_dir}")
     print(f"candidates={len(candidates)}")
 
@@ -151,6 +157,7 @@ def cmd_server_eval(args: argparse.Namespace) -> int:
             port=args.port,
             startup_timeout=args.startup_timeout,
             request_timeout=args.request_timeout,
+            run_metadata=run_metadata,
         )
         results.append(result)
         if result.health_ok and result.chat_ok and (best is None or result.generation_tps > best.generation_tps):

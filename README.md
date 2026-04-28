@@ -113,6 +113,7 @@ tuning-runs/
       server.jsonl
       best.json
       server-best.json
+      run-metadata.json
 ```
 
 The profile contains the model path, runtime flags, benchmark summary, and the
@@ -123,6 +124,10 @@ tokens per second, including success counts, failed candidate counts, prompt
 throughput, and the winning candidate flags. It can read both `run.jsonl`
 from `llama-bench` and `server.jsonl` from temporary `llama-server` request
 evals.
+
+`run-metadata.json` captures the machine and power context for a run, including
+hostname, platform, CPU count, `pmset` power source, battery status, and
+Battery/AC `powermode` values when available.
 
 ## Roadmap
 

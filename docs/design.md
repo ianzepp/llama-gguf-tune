@@ -37,6 +37,11 @@ old runs, publish evidence, and audit the selected profile later.
 request evals: process launch, health status, chat request success, latency,
 metrics, response metadata, and stderr are saved for later comparison.
 
+`run-metadata.json` records environmental context that changes timing results,
+especially macOS power source, Low Power Mode / `powermode`, battery state,
+hostname, platform, and CPU count. Individual result records also include the
+same metadata under `run` so copied JSONL lines remain interpretable.
+
 ## Scoring
 
 The first scoring model prioritizes generation throughput from `llama-bench`.

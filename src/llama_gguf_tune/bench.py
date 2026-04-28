@@ -20,6 +20,7 @@ class BenchResult:
     stdout: str
     stderr: str
     metrics: dict[str, Any]
+    run_metadata: dict[str, Any] | None = None
 
     @property
     def generation_tps(self) -> float:
@@ -33,6 +34,7 @@ class BenchResult:
             "stdout": self.stdout,
             "stderr": self.stderr,
             "metrics": self.metrics,
+            "run": self.run_metadata or {},
         }
 
 
@@ -51,6 +53,7 @@ def run_llama_bench(
     repetitions: int,
     prompt_tokens: int,
     gen_tokens: int,
+    run_metadata: dict[str, Any] | None = None,
 ) -> BenchResult:
     command = [
         llama_bench,
@@ -75,6 +78,7 @@ def run_llama_bench(
         stdout=completed.stdout,
         stderr=completed.stderr,
         metrics=metrics,
+        run_metadata=run_metadata,
     )
 
 
@@ -124,14 +128,20 @@ def write_jsonl(path: Path, records: list[dict[str, Any]]) -> None:
             handle.write(json.dumps(record, sort_keys=True) + "\n")
 
 
-def write_best_profile(run_dir: Path, model_path: Path, best: BenchResult) -> Path:
+def write_best_profile(
+    run_dir: Path,
+    model_path: Path,
+    best: BenchResult,
+    run_metadata: dict[str, Any] | None = None,
+) -> Path:
     profile_path = run_dir / "best.json"
     profile = {
         "model": str(model_path),
         "candidate": best.candidate.as_dict(),
         "metrics": best.metrics,
         "command": best.command,
-        "environment": {
+        "environment": run_metadata
+        or {
             "platform": os.uname().sysname,
             "machine": os.uname().machine,
             "release": os.uname().release,

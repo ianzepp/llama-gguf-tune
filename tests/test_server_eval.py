@@ -76,6 +76,7 @@ llamacpp:requests_processing 0
             metrics={"generation_tps": 42.0},
             response={"id": "chatcmpl"},
             stderr="",
+            run_metadata={"power": {"source": "Battery Power"}},
         )
 
         payload = result.as_dict()
@@ -83,3 +84,4 @@ llamacpp:requests_processing 0
         self.assertEqual(payload["returncode"], 0)
         self.assertEqual(payload["latency_seconds"], 1.25)
         self.assertEqual(payload["metrics"]["generation_tps"], 42.0)
+        self.assertEqual(payload["run"]["power"]["source"], "Battery Power")
