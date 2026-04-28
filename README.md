@@ -66,6 +66,14 @@ Print the best saved profile for a model:
 llama-gguf-tune profile ./model.gguf
 ```
 
+Summarize and rank saved benchmark runs:
+
+```sh
+llama-gguf-tune eval ./tuning-runs
+llama-gguf-tune eval ./tuning-runs --latest --top 5
+llama-gguf-tune eval ./tuning-runs --json
+```
+
 ## What Gets Tuned
 
 Initial matrix dimensions:
@@ -101,6 +109,10 @@ tuning-runs/
 The profile contains the model path, runtime flags, benchmark summary, and the
 exact command used.
 
+`llama-gguf-tune eval` reads those artifacts back and ranks runs by decode
+tokens per second, including success counts, failed candidate counts, prompt
+throughput, and the winning candidate flags.
+
 ## Roadmap
 
 - `llama-server` request benchmarks against temporary ports.
@@ -109,4 +121,3 @@ exact command used.
 - Draft-model speculative decoding profiles.
 - Hugging Face repo and quant discovery.
 - Agent loop that proposes bounded candidate matrices.
-

@@ -27,6 +27,12 @@ One benchmark execution for one model and one candidate.
 
 The selected best candidate plus benchmark evidence.
 
+### Eval Summary
+
+A comparison view over saved run artifacts. Eval summaries are intentionally
+derived from `run.jsonl` rather than live benchmark state, so users can compare
+old runs, publish evidence, and audit the selected profile later.
+
 ## Scoring
 
 The first scoring model prioritizes generation throughput from `llama-bench`.
@@ -39,8 +45,11 @@ Future versions should score on:
 - server request latency
 - quality guardrails
 
+The current `eval` command ranks saved runs by best successful generation
+throughput and reports the winning candidate, prompt throughput, success count,
+and failure count.
+
 ## Safety
 
 The CLI writes artifacts only under the selected runs directory. Promotion to
 wrapper scripts or service configs should be a separate explicit command.
-

@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import sys
 from pathlib import Path
 
 from .bench import create_run_dir, require_llama_bench, run_llama_bench, write_best_profile, write_jsonl
 from .candidates import default_candidates
+from .evals import discover_run_dirs, format_eval_table, select_latest_run_dirs, summarize_runs
 from .models import find_gguf_models, human_size
 
 
@@ -45,6 +47,13 @@ def build_parser() -> argparse.ArgumentParser:
     profile.add_argument("model", type=Path)
     profile.add_argument("--runs-dir", type=Path, default=Path("tuning-runs"))
     profile.set_defaults(func=cmd_profile)
+
+    evals = subparsers.add_parser("eval", help="summarize and rank saved benchmark runs")
+    evals.add_argument("runs_dir", type=Path, nargs="?", default=Path("tuning-runs"))
+    evals.add_argument("--json", action="store_true", help="emit machine-readable JSON")
+    evals.add_argument("--latest", action="store_true", help="show only the newest run for each model")
+    evals.add_argument("--top", type=int, default=None, help="limit output to the top N runs")
+    evals.set_defaults(func=cmd_eval)
 
     return parser
 
@@ -111,6 +120,25 @@ def cmd_profile(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_eval(args: argparse.Namespace) -> int:
+    runs_dir = args.runs_dir.expanduser().resolve()
+    run_dirs = discover_run_dirs(runs_dir)
+    if not run_dirs:
+        raise RuntimeError(f"no run.jsonl artifacts found under {runs_dir}")
+    if args.latest:
+        run_dirs = select_latest_run_dirs(run_dirs)
+
+    results = summarize_runs(run_dirs)
+    if args.top is not None:
+        if args.top < 1:
+            raise RuntimeError("--top must be at least 1")
+        results = results[: args.top]
+    if args.json:
+        print(json.dumps([result.as_dict() for result in results], indent=2, sort_keys=True))
+    else:
+        print(format_eval_table(results))
+    return 0
+
+
 if __name__ == "__main__":
     raise SystemExit(main())
-
