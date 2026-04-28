@@ -58,6 +58,11 @@ The current `eval` command ranks saved runs by best successful generation
 throughput and reports the winning candidate, prompt throughput, success count,
 and failure count.
 
+`eval --kind bench|server|all` keeps raw `llama-bench` comparisons separate from
+temporary `llama-server` request measurements. The table includes a compact run
+context tag such as `Battery/1` or `AC/0`, but power state is treated as
+provenance rather than the primary scoring axis.
+
 ## Safety
 
 The CLI writes artifacts only under the selected runs directory. Promotion to

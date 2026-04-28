@@ -4,6 +4,7 @@ from unittest import TestCase
 from llama_gguf_tune.candidates import Candidate
 from llama_gguf_tune.server_eval import (
     ServerEvalResult,
+    aggregate_repetition_results,
     build_chat_payload,
     build_server_command,
     parse_prometheus_metrics,
@@ -85,3 +86,38 @@ llamacpp:requests_processing 0
         self.assertEqual(payload["latency_seconds"], 1.25)
         self.assertEqual(payload["metrics"]["generation_tps"], 42.0)
         self.assertEqual(payload["run"]["power"]["source"], "Battery Power")
+
+    def test_aggregate_repetition_results_uses_mean_and_preserves_samples(self) -> None:
+        results = [
+            ServerEvalResult(
+                candidate={"threads": 6},
+                command=["llama-server"],
+                returncode=0,
+                latency_seconds=1.0,
+                health_ok=True,
+                chat_ok=True,
+                metrics={"generation_tps": 10.0, "prompt_tps": 100.0},
+                response={"id": "one"},
+                stderr="a",
+            ),
+            ServerEvalResult(
+                candidate={"threads": 6},
+                command=["llama-server"],
+                returncode=0,
+                latency_seconds=3.0,
+                health_ok=True,
+                chat_ok=True,
+                metrics={"generation_tps": 20.0, "prompt_tps": 200.0},
+                response={"id": "two"},
+                stderr="b",
+            ),
+        ]
+
+        result = aggregate_repetition_results(results)
+
+        self.assertEqual(result.metrics["generation_tps"], 15.0)
+        self.assertEqual(result.metrics["generation_tps_min"], 10.0)
+        self.assertEqual(result.metrics["generation_tps_max"], 20.0)
+        self.assertEqual(result.metrics["prompt_tps"], 150.0)
+        self.assertEqual(result.latency_seconds, 2.0)
+        self.assertEqual(len(result.metrics["samples"]), 2)

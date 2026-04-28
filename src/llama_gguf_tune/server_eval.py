@@ -172,6 +172,49 @@ def run_llama_server_eval(
     )
 
 
+def aggregate_repetition_results(results: list[ServerEvalResult]) -> ServerEvalResult:
+    if not results:
+        raise RuntimeError("cannot aggregate empty server eval results")
+    first = results[0]
+    generation_values = [result.generation_tps for result in results if result.health_ok and result.chat_ok]
+    prompt_values = [
+        float(result.metrics["prompt_tps"])
+        for result in results
+        if result.health_ok and result.chat_ok and isinstance(result.metrics.get("prompt_tps"), int | float)
+    ]
+    latency_values = [result.latency_seconds for result in results]
+    metrics: dict[str, Any] = {
+        "samples": [sample.as_dict() for sample in results],
+        "repetitions": len(results),
+        "successful_repetitions": sum(1 for result in results if result.health_ok and result.chat_ok),
+    }
+    if generation_values:
+        metrics["generation_tps"] = mean(generation_values)
+        metrics["generation_tps_min"] = min(generation_values)
+        metrics["generation_tps_max"] = max(generation_values)
+    if prompt_values:
+        metrics["prompt_tps"] = mean(prompt_values)
+        metrics["prompt_tps_min"] = min(prompt_values)
+        metrics["prompt_tps_max"] = max(prompt_values)
+
+    return ServerEvalResult(
+        candidate=first.candidate,
+        command=first.command,
+        returncode=0 if all(result.returncode == 0 for result in results) else first.returncode,
+        latency_seconds=mean(latency_values),
+        health_ok=all(result.health_ok for result in results),
+        chat_ok=all(result.chat_ok for result in results),
+        metrics=metrics,
+        response=results[-1].response,
+        stderr="\n".join(result.stderr for result in results if result.stderr),
+        run_metadata=first.run_metadata,
+    )
+
+
+def mean(values: list[float]) -> float:
+    return sum(values) / len(values)
+
+
 def wait_for_health(host: str, port: int, timeout: float) -> bool:
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:

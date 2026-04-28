@@ -36,6 +36,7 @@ class EvalTests(TestCase):
             self.assertEqual(result.best_generation_tps, 12.5)
             self.assertEqual(result.best_prompt_tps, 45.0)
             self.assertEqual(result.best_candidate["threads"], 6)
+            self.assertEqual(result.artifact_kind, "bench")
 
     def test_discover_run_dirs_returns_only_dirs_with_run_jsonl(self) -> None:
         with TemporaryDirectory() as tmp:
@@ -50,6 +51,8 @@ class EvalTests(TestCase):
             ignored.mkdir()
 
             self.assertEqual(discover_run_dirs(root), [good, server])
+            self.assertEqual(discover_run_dirs(root, artifact_kind="bench"), [good])
+            self.assertEqual(discover_run_dirs(root, artifact_kind="server"), [server])
 
     def test_load_eval_result_reads_server_jsonl(self) -> None:
         with TemporaryDirectory() as tmp:
@@ -71,6 +74,7 @@ class EvalTests(TestCase):
             self.assertEqual(result.failed_candidates, 1)
             self.assertEqual(result.best_generation_tps, 25.0)
             self.assertEqual(result.best_candidate["threads"], 6)
+            self.assertEqual(result.artifact_kind, "server")
 
     def test_select_latest_run_dirs_keeps_newest_run_for_each_model(self) -> None:
         with TemporaryDirectory() as tmp:
@@ -98,17 +102,21 @@ class EvalTests(TestCase):
         result = EvalResult(
             run_dir=Path("/tmp/run"),
             model_name="model.gguf",
+            artifact_kind="server",
             total_candidates=3,
             successful_candidates=2,
             failed_candidates=1,
             best_generation_tps=12.3456,
             best_prompt_tps=99.9,
             best_candidate={"threads": 6, "flash_attn": True},
+            run_context={"power": {"source": "Battery Power", "powermode": {"Battery Power": 1}}},
         )
 
         table = format_eval_table([result])
 
         self.assertIn("model.gguf", table)
+        self.assertIn("server", table)
+        self.assertIn("Battery/1", table)
         self.assertIn("12.346", table)
         self.assertIn("2/3", table)
         self.assertIn("1", table)
@@ -145,6 +153,7 @@ def record(
             "prompt_tps": prompt_tps,
             "raw_rows": [{"model_filename": model}],
         },
+        "run": {"power": {"source": "Battery Power", "powermode": {"Battery Power": 1}}},
     }
 
 
@@ -166,4 +175,5 @@ def server_record(
             "generation_tps": generation_tps,
             "prompt_tps": prompt_tps,
         },
+        "run": {"power": {"source": "AC Power", "powermode": {"AC Power": 0}}},
     }

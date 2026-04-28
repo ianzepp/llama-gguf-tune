@@ -11,7 +11,7 @@ from .candidates import default_candidates
 from .evals import discover_run_dirs, format_eval_table, select_latest_run_dirs, summarize_runs
 from .models import find_gguf_models, human_size
 from .run_metadata import capture_run_metadata, write_run_metadata
-from .server_eval import require_llama_server, run_llama_server_eval
+from .server_eval import aggregate_repetition_results, require_llama_server, run_llama_server_eval
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -50,6 +50,7 @@ def build_parser() -> argparse.ArgumentParser:
     server_eval.add_argument("--runs-dir", type=Path, default=Path("tuning-runs"))
     server_eval.add_argument("--llama-server", dest="llama_server", default=None)
     server_eval.add_argument("--limit", type=int, default=4, help="maximum candidates to run")
+    server_eval.add_argument("--repetitions", type=int, default=1, help="requests to run per candidate")
     server_eval.add_argument("--prompt", default="Reply with one concise sentence about local inference tuning.")
     server_eval.add_argument("--max-tokens", type=int, default=64)
     server_eval.add_argument("--startup-timeout", type=float, default=120.0)
@@ -66,6 +67,7 @@ def build_parser() -> argparse.ArgumentParser:
     evals = subparsers.add_parser("eval", help="summarize and rank saved benchmark runs")
     evals.add_argument("runs_dir", type=Path, nargs="?", default=Path("tuning-runs"))
     evals.add_argument("--json", action="store_true", help="emit machine-readable JSON")
+    evals.add_argument("--kind", choices=["all", "bench", "server"], default="all")
     evals.add_argument("--latest", action="store_true", help="show only the newest run for each model")
     evals.add_argument("--top", type=int, default=None, help="limit output to the top N runs")
     evals.set_defaults(func=cmd_eval)
@@ -93,11 +95,14 @@ def cmd_bench(args: argparse.Namespace) -> int:
     llama_bench = require_llama_bench(args.llama_bench)
     logical_cpus = os.cpu_count() or 1
     candidates = default_candidates(logical_cpus)[: args.limit]
+    if args.repetitions < 1:
+        raise RuntimeError("--repetitions must be at least 1")
     run_dir = create_run_dir(args.runs_dir.expanduser().resolve(), model)
     run_metadata = capture_run_metadata()
     write_run_metadata(run_dir, run_metadata)
     print(f"run_dir={run_dir}")
     print(f"candidates={len(candidates)}")
+    print(f"repetitions={args.repetitions}")
 
     results = []
     best = None
@@ -137,28 +142,35 @@ def cmd_server_eval(args: argparse.Namespace) -> int:
     llama_server = require_llama_server(args.llama_server)
     logical_cpus = os.cpu_count() or 1
     candidates = default_candidates(logical_cpus)[: args.limit]
+    if args.repetitions < 1:
+        raise RuntimeError("--repetitions must be at least 1")
     run_dir = create_run_dir(args.runs_dir.expanduser().resolve(), model)
     run_metadata = capture_run_metadata()
     write_run_metadata(run_dir, run_metadata)
     print(f"run_dir={run_dir}")
     print(f"candidates={len(candidates)}")
+    print(f"repetitions={args.repetitions}")
 
     results = []
     best = None
     for index, candidate in enumerate(candidates, start=1):
         print(f"[{index}/{len(candidates)}] {candidate.as_dict()}", flush=True)
-        result = run_llama_server_eval(
-            model,
-            candidate,
-            llama_server=llama_server,
-            prompt=args.prompt,
-            max_tokens=args.max_tokens,
-            host=args.host,
-            port=args.port,
-            startup_timeout=args.startup_timeout,
-            request_timeout=args.request_timeout,
-            run_metadata=run_metadata,
-        )
+        repetitions = [
+            run_llama_server_eval(
+                model,
+                candidate,
+                llama_server=llama_server,
+                prompt=args.prompt,
+                max_tokens=args.max_tokens,
+                host=args.host,
+                port=args.port,
+                startup_timeout=args.startup_timeout,
+                request_timeout=args.request_timeout,
+                run_metadata=run_metadata,
+            )
+            for _ in range(args.repetitions)
+        ]
+        result = aggregate_repetition_results(repetitions)
         results.append(result)
         if result.health_ok and result.chat_ok and (best is None or result.generation_tps > best.generation_tps):
             best = result
@@ -192,13 +204,13 @@ def cmd_profile(args: argparse.Namespace) -> int:
 
 def cmd_eval(args: argparse.Namespace) -> int:
     runs_dir = args.runs_dir.expanduser().resolve()
-    run_dirs = discover_run_dirs(runs_dir)
+    run_dirs = discover_run_dirs(runs_dir, artifact_kind=args.kind)
     if not run_dirs:
-        raise RuntimeError(f"no run.jsonl artifacts found under {runs_dir}")
+        raise RuntimeError(f"no {args.kind} artifacts found under {runs_dir}")
     if args.latest:
         run_dirs = select_latest_run_dirs(run_dirs)
 
-    results = summarize_runs(run_dirs)
+    results = summarize_runs(run_dirs, artifact_kind=args.kind if args.kind != "all" else "auto")
     if args.top is not None:
         if args.top < 1:
             raise RuntimeError("--top must be at least 1")

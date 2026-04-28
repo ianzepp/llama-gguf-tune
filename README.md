@@ -58,7 +58,7 @@ Run temporary `llama-server` request evals:
 
 ```sh
 llama-gguf-tune server-eval ./model.gguf
-llama-gguf-tune server-eval ./model.gguf --limit 2 --max-tokens 32
+llama-gguf-tune server-eval ./model.gguf --limit 2 --repetitions 5 --max-tokens 32
 ```
 
 Write artifacts to a specific directory:
@@ -77,6 +77,7 @@ Summarize and rank saved benchmark runs:
 
 ```sh
 llama-gguf-tune eval ./tuning-runs
+llama-gguf-tune eval ./tuning-runs --kind server
 llama-gguf-tune eval ./tuning-runs --latest --top 5
 llama-gguf-tune eval ./tuning-runs --json
 ```
@@ -128,6 +129,13 @@ evals.
 `run-metadata.json` captures the machine and power context for a run, including
 hostname, platform, CPU count, `pmset` power source, battery status, and
 Battery/AC `powermode` values when available.
+
+Power context is stored as provenance. Use it to spot trends, but prefer
+repeated server evals and artifact-kind filtering before drawing conclusions:
+
+```sh
+llama-gguf-tune eval ./tuning-runs --kind server --latest
+```
 
 ## Roadmap
 

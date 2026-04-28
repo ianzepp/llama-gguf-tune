@@ -10,33 +10,38 @@ from typing import Any
 class EvalResult:
     run_dir: Path
     model_name: str
+    artifact_kind: str
     total_candidates: int
     successful_candidates: int
     failed_candidates: int
     best_generation_tps: float
     best_prompt_tps: float
     best_candidate: dict[str, Any]
+    run_context: dict[str, Any]
 
     def as_dict(self) -> dict[str, Any]:
         return {
             "run_dir": str(self.run_dir),
             "model_name": self.model_name,
+            "artifact_kind": self.artifact_kind,
             "total_candidates": self.total_candidates,
             "successful_candidates": self.successful_candidates,
             "failed_candidates": self.failed_candidates,
             "best_generation_tps": self.best_generation_tps,
             "best_prompt_tps": self.best_prompt_tps,
             "best_candidate": self.best_candidate,
+            "run_context": self.run_context,
         }
 
 
-def discover_run_dirs(root: Path) -> list[Path]:
+def discover_run_dirs(root: Path, artifact_kind: str = "all") -> list[Path]:
     """Return run directories containing benchmark artifacts."""
-    if has_run_artifact(root):
+    patterns = artifact_patterns(artifact_kind)
+    if has_run_artifact(root, artifact_kind):
         return [root]
     run_dirs = {
         path.parent
-        for pattern in ["run.jsonl", "server.jsonl"]
+        for pattern in patterns
         for path in root.rglob(pattern)
         if path.is_file()
     }
@@ -53,13 +58,14 @@ def select_latest_run_dirs(run_dirs: list[Path]) -> list[Path]:
     return sorted(latest.values(), key=lambda path: path.parent.name)
 
 
-def summarize_runs(run_dirs: list[Path]) -> list[EvalResult]:
-    results = [load_eval_result(run_dir) for run_dir in run_dirs]
+def summarize_runs(run_dirs: list[Path], artifact_kind: str = "auto") -> list[EvalResult]:
+    results = [load_eval_result(run_dir, artifact_kind=artifact_kind) for run_dir in run_dirs]
     return sorted(results, key=lambda result: result.best_generation_tps, reverse=True)
 
 
-def load_eval_result(run_dir: Path) -> EvalResult:
-    path = artifact_path(run_dir)
+def load_eval_result(run_dir: Path, artifact_kind: str = "auto") -> EvalResult:
+    path = artifact_path(run_dir, artifact_kind)
+    resolved_kind = kind_from_artifact(path)
     records = load_run_records(path)
     if not records:
         raise RuntimeError(f"no benchmark records found in {path}")
@@ -79,12 +85,14 @@ def load_eval_result(run_dir: Path) -> EvalResult:
     return EvalResult(
         run_dir=run_dir,
         model_name=model_name_from_record(best, run_dir),
+        artifact_kind=resolved_kind,
         total_candidates=len(records),
         successful_candidates=len(successes),
         failed_candidates=len(records) - len(successes),
         best_generation_tps=best_generation_tps,
         best_prompt_tps=best_prompt_tps,
         best_candidate=best_candidate,
+        run_context=run_context_from_record(best),
     )
 
 
@@ -105,15 +113,33 @@ def load_run_records(path: Path) -> list[dict[str, Any]]:
     return records
 
 
-def has_run_artifact(run_dir: Path) -> bool:
-    return (run_dir / "run.jsonl").is_file() or (run_dir / "server.jsonl").is_file()
+def has_run_artifact(run_dir: Path, artifact_kind: str = "all") -> bool:
+    return any((run_dir / pattern).is_file() for pattern in artifact_patterns(artifact_kind))
 
 
-def artifact_path(run_dir: Path) -> Path:
+def artifact_path(run_dir: Path, artifact_kind: str = "auto") -> Path:
+    if artifact_kind == "server":
+        return run_dir / "server.jsonl"
+    if artifact_kind == "bench":
+        return run_dir / "run.jsonl"
     bench_path = run_dir / "run.jsonl"
     if bench_path.is_file():
         return bench_path
     return run_dir / "server.jsonl"
+
+
+def artifact_patterns(artifact_kind: str) -> list[str]:
+    if artifact_kind in {"all", "auto"}:
+        return ["run.jsonl", "server.jsonl"]
+    if artifact_kind == "bench":
+        return ["run.jsonl"]
+    if artifact_kind == "server":
+        return ["server.jsonl"]
+    raise RuntimeError("--kind must be one of: all, bench, server")
+
+
+def kind_from_artifact(path: Path) -> str:
+    return "server" if path.name == "server.jsonl" else "bench"
 
 
 def record_successful(record: dict[str, Any]) -> bool:
@@ -123,14 +149,16 @@ def record_successful(record: dict[str, Any]) -> bool:
 
 
 def format_eval_table(results: list[EvalResult]) -> str:
-    headers = ["model", "decode tok/s", "prompt tok/s", "success", "failed", "best candidate", "run"]
+    headers = ["kind", "model", "decode tok/s", "prompt tok/s", "success", "failed", "ctx", "best candidate", "run"]
     rows = [
         [
+            result.artifact_kind,
             result.model_name,
             f"{result.best_generation_tps:.3f}",
             f"{result.best_prompt_tps:.3f}",
             f"{result.successful_candidates}/{result.total_candidates}",
             str(result.failed_candidates),
+            format_run_context(result.run_context),
             format_candidate(result.best_candidate),
             str(result.run_dir),
         ]
@@ -143,6 +171,20 @@ def format_candidate(candidate: dict[str, Any]) -> str:
     if not candidate:
         return "-"
     return " ".join(f"{key}={candidate[key]}" for key in sorted(candidate))
+
+
+def format_run_context(context: dict[str, Any]) -> str:
+    power = context.get("power")
+    if not isinstance(power, dict):
+        return "-"
+    source = power.get("source")
+    if not isinstance(source, str):
+        return "-"
+    short_source = "Battery" if source == "Battery Power" else "AC" if source == "AC Power" else source
+    powermode = power.get("powermode")
+    if isinstance(powermode, dict) and isinstance(powermode.get(source), int):
+        return f"{short_source}/{powermode[source]}"
+    return short_source
 
 
 def format_table(headers: list[str], rows: list[list[str]]) -> str:
@@ -176,6 +218,11 @@ def metric_float(record: dict[str, Any], name: str) -> float:
 def candidate_from_record(record: dict[str, Any]) -> dict[str, Any]:
     candidate = record.get("candidate")
     return dict(candidate) if isinstance(candidate, dict) else {}
+
+
+def run_context_from_record(record: dict[str, Any]) -> dict[str, Any]:
+    context = record.get("run")
+    return dict(context) if isinstance(context, dict) else {}
 
 
 def model_name_from_record(record: dict[str, Any], run_dir: Path) -> str:

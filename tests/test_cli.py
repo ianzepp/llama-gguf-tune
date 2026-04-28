@@ -55,6 +55,31 @@ class CliTests(TestCase):
             self.assertEqual(payload[0]["model_name"], "other.gguf")
             self.assertEqual(payload[0]["best_generation_tps"], 30.0)
 
+    def test_eval_command_filters_by_kind(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            make_run(root, "bench-model", 10.0)
+            server_dir = root / "server-model" / "20260428T000000Z"
+            server_dir.mkdir(parents=True)
+            server_record = {
+                "command": ["llama-server", "-m", "server-model.gguf"],
+                "health_ok": True,
+                "chat_ok": True,
+                "candidate": {"threads": 6},
+                "metrics": {"generation_tps": 20.0, "prompt_tps": 100.0},
+            }
+            (server_dir / "server.jsonl").write_text(json.dumps(server_record) + "\n", encoding="utf-8")
+
+            stdout = io.StringIO()
+            with contextlib.redirect_stdout(stdout):
+                exit_code = main(["eval", str(root), "--kind", "server", "--json"])
+
+            self.assertEqual(exit_code, 0)
+            payload = json.loads(stdout.getvalue())
+            self.assertEqual(len(payload), 1)
+            self.assertEqual(payload[0]["artifact_kind"], "server")
+            self.assertEqual(payload[0]["model_name"], "server-model.gguf")
+
     def test_server_eval_command_writes_server_artifacts(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -78,10 +103,22 @@ class CliTests(TestCase):
                 patch("llama_gguf_tune.cli.run_llama_server_eval", return_value=result),
                 contextlib.redirect_stdout(stdout),
             ):
-                exit_code = main(["server-eval", str(model), "--runs-dir", str(root / "runs"), "--limit", "1"])
+                exit_code = main(
+                    [
+                        "server-eval",
+                        str(model),
+                        "--runs-dir",
+                        str(root / "runs"),
+                        "--limit",
+                        "1",
+                        "--repetitions",
+                        "2",
+                    ]
+                )
 
             self.assertEqual(exit_code, 0)
             self.assertIn("best_generation_tps=42.000", stdout.getvalue())
+            self.assertIn("repetitions=2", stdout.getvalue())
             self.assertEqual(len(list((root / "runs").rglob("server.jsonl"))), 1)
             self.assertEqual(len(list((root / "runs").rglob("server-best.json"))), 1)
 
@@ -94,5 +131,6 @@ def make_run(root: Path, model_stem: str, generation_tps: float, timestamp: str 
         "returncode": 0,
         "candidate": {"threads": 6},
         "metrics": {"generation_tps": generation_tps, "prompt_tps": 200.0},
+        "run": {"power": {"source": "Battery Power", "powermode": {"Battery Power": 1}}},
     }
     (run_dir / "run.jsonl").write_text(json.dumps(record) + "\n", encoding="utf-8")
