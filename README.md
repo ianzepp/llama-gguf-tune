@@ -54,6 +54,13 @@ Run a small benchmark matrix:
 llama-gguf-tune bench /Volumes/ai/models/Qwen3.6-35B-A3B-GGUF/Qwen3.6-35B-A3B-UD-Q4_K_M.gguf
 ```
 
+Run temporary `llama-server` request evals:
+
+```sh
+llama-gguf-tune server-eval ./model.gguf
+llama-gguf-tune server-eval ./model.gguf --limit 2 --max-tokens 32
+```
+
 Write artifacts to a specific directory:
 
 ```sh
@@ -103,7 +110,9 @@ tuning-runs/
   <model-stem>/
     <timestamp>/
       run.jsonl
+      server.jsonl
       best.json
+      server-best.json
 ```
 
 The profile contains the model path, runtime flags, benchmark summary, and the
@@ -111,7 +120,9 @@ exact command used.
 
 `llama-gguf-tune eval` reads those artifacts back and ranks runs by decode
 tokens per second, including success counts, failed candidate counts, prompt
-throughput, and the winning candidate flags.
+throughput, and the winning candidate flags. It can read both `run.jsonl`
+from `llama-bench` and `server.jsonl` from temporary `llama-server` request
+evals.
 
 ## Roadmap
 

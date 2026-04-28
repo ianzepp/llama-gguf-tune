@@ -43,10 +43,34 @@ class EvalTests(TestCase):
             good = root / "model-a" / "20260428T000000Z"
             good.mkdir(parents=True)
             (good / "run.jsonl").write_text("{}", encoding="utf-8")
+            server = root / "model-c" / "20260428T010000Z"
+            server.mkdir(parents=True)
+            (server / "server.jsonl").write_text("{}", encoding="utf-8")
             ignored = root / "model-b"
             ignored.mkdir()
 
-            self.assertEqual(discover_run_dirs(root), [good])
+            self.assertEqual(discover_run_dirs(root), [good, server])
+
+    def test_load_eval_result_reads_server_jsonl(self) -> None:
+        with TemporaryDirectory() as tmp:
+            run_dir = Path(tmp)
+            write_jsonl(
+                run_dir / "server.jsonl",
+                [
+                    server_record("server.gguf", True, True, 20.0, 100.0, {"threads": 4}),
+                    server_record("server.gguf", True, False, 999.0, 999.0, {"threads": 99}),
+                    server_record("server.gguf", True, True, 25.0, 90.0, {"threads": 6}),
+                ],
+            )
+
+            result = load_eval_result(run_dir)
+
+            self.assertEqual(result.model_name, "server.gguf")
+            self.assertEqual(result.total_candidates, 3)
+            self.assertEqual(result.successful_candidates, 2)
+            self.assertEqual(result.failed_candidates, 1)
+            self.assertEqual(result.best_generation_tps, 25.0)
+            self.assertEqual(result.best_candidate["threads"], 6)
 
     def test_select_latest_run_dirs_keeps_newest_run_for_each_model(self) -> None:
         with TemporaryDirectory() as tmp:
@@ -120,5 +144,26 @@ def record(
             "generation_tps": generation_tps,
             "prompt_tps": prompt_tps,
             "raw_rows": [{"model_filename": model}],
+        },
+    }
+
+
+def server_record(
+    model: str,
+    health_ok: bool,
+    chat_ok: bool,
+    generation_tps: float,
+    prompt_tps: float,
+    candidate: dict[str, object],
+) -> dict[str, object]:
+    return {
+        "command": ["llama-server", "-m", model],
+        "returncode": -15,
+        "health_ok": health_ok,
+        "chat_ok": chat_ok,
+        "candidate": candidate,
+        "metrics": {
+            "generation_tps": generation_tps,
+            "prompt_tps": prompt_tps,
         },
     }

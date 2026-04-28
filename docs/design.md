@@ -33,6 +33,10 @@ A comparison view over saved run artifacts. Eval summaries are intentionally
 derived from `run.jsonl` rather than live benchmark state, so users can compare
 old runs, publish evidence, and audit the selected profile later.
 
+`server.jsonl` follows the same artifact principle for temporary `llama-server`
+request evals: process launch, health status, chat request success, latency,
+metrics, response metadata, and stderr are saved for later comparison.
+
 ## Scoring
 
 The first scoring model prioritizes generation throughput from `llama-bench`.

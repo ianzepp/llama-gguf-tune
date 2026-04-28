@@ -31,10 +31,16 @@ class EvalResult:
 
 
 def discover_run_dirs(root: Path) -> list[Path]:
-    """Return run directories containing a run.jsonl artifact."""
-    if (root / "run.jsonl").is_file():
+    """Return run directories containing benchmark artifacts."""
+    if has_run_artifact(root):
         return [root]
-    return sorted(path.parent for path in root.rglob("run.jsonl") if path.is_file())
+    run_dirs = {
+        path.parent
+        for pattern in ["run.jsonl", "server.jsonl"]
+        for path in root.rglob(pattern)
+        if path.is_file()
+    }
+    return sorted(run_dirs)
 
 
 def select_latest_run_dirs(run_dirs: list[Path]) -> list[Path]:
@@ -53,11 +59,12 @@ def summarize_runs(run_dirs: list[Path]) -> list[EvalResult]:
 
 
 def load_eval_result(run_dir: Path) -> EvalResult:
-    records = load_run_records(run_dir / "run.jsonl")
+    path = artifact_path(run_dir)
+    records = load_run_records(path)
     if not records:
-        raise RuntimeError(f"no benchmark records found in {run_dir / 'run.jsonl'}")
+        raise RuntimeError(f"no benchmark records found in {path}")
 
-    successes = [record for record in records if record.get("returncode") == 0]
+    successes = [record for record in records if record_successful(record)]
     if successes:
         best = max(successes, key=record_generation_tps)
         best_generation_tps = record_generation_tps(best)
@@ -96,6 +103,23 @@ def load_run_records(path: Path) -> list[dict[str, Any]]:
                 raise RuntimeError(f"expected object record in {path}:{line_number}")
             records.append(payload)
     return records
+
+
+def has_run_artifact(run_dir: Path) -> bool:
+    return (run_dir / "run.jsonl").is_file() or (run_dir / "server.jsonl").is_file()
+
+
+def artifact_path(run_dir: Path) -> Path:
+    bench_path = run_dir / "run.jsonl"
+    if bench_path.is_file():
+        return bench_path
+    return run_dir / "server.jsonl"
+
+
+def record_successful(record: dict[str, Any]) -> bool:
+    if "health_ok" in record or "chat_ok" in record:
+        return bool(record.get("health_ok")) and bool(record.get("chat_ok"))
+    return record.get("returncode") == 0
 
 
 def format_eval_table(results: list[EvalResult]) -> str:

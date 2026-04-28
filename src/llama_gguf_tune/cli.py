@@ -10,6 +10,7 @@ from .bench import create_run_dir, require_llama_bench, run_llama_bench, write_b
 from .candidates import default_candidates
 from .evals import discover_run_dirs, format_eval_table, select_latest_run_dirs, summarize_runs
 from .models import find_gguf_models, human_size
+from .server_eval import require_llama_server, run_llama_server_eval
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -42,6 +43,19 @@ def build_parser() -> argparse.ArgumentParser:
     bench.add_argument("--prompt-tokens", type=int, default=512)
     bench.add_argument("--gen-tokens", type=int, default=128)
     bench.set_defaults(func=cmd_bench)
+
+    server_eval = subparsers.add_parser("server-eval", help="run temporary llama-server request evals")
+    server_eval.add_argument("model", type=Path)
+    server_eval.add_argument("--runs-dir", type=Path, default=Path("tuning-runs"))
+    server_eval.add_argument("--llama-server", dest="llama_server", default=None)
+    server_eval.add_argument("--limit", type=int, default=4, help="maximum candidates to run")
+    server_eval.add_argument("--prompt", default="Reply with one concise sentence about local inference tuning.")
+    server_eval.add_argument("--max-tokens", type=int, default=64)
+    server_eval.add_argument("--startup-timeout", type=float, default=120.0)
+    server_eval.add_argument("--request-timeout", type=float, default=60.0)
+    server_eval.add_argument("--host", default="127.0.0.1")
+    server_eval.add_argument("--port", type=int, default=None)
+    server_eval.set_defaults(func=cmd_server_eval)
 
     profile = subparsers.add_parser("profile", help="print the latest saved best profile for a model")
     profile.add_argument("model", type=Path)
@@ -106,6 +120,55 @@ def cmd_bench(args: argparse.Namespace) -> int:
     profile_path = write_best_profile(run_dir, model, best)
     print(f"best_generation_tps={best.generation_tps:.3f}")
     print(f"best_profile={profile_path}")
+    return 0
+
+
+def cmd_server_eval(args: argparse.Namespace) -> int:
+    model = args.model.expanduser().resolve()
+    if not model.is_file():
+        raise RuntimeError(f"model not found: {model}")
+    if model.suffix.lower() != ".gguf":
+        raise RuntimeError(f"expected a .gguf model: {model}")
+
+    llama_server = require_llama_server(args.llama_server)
+    logical_cpus = os.cpu_count() or 1
+    candidates = default_candidates(logical_cpus)[: args.limit]
+    run_dir = create_run_dir(args.runs_dir.expanduser().resolve(), model)
+    print(f"run_dir={run_dir}")
+    print(f"candidates={len(candidates)}")
+
+    results = []
+    best = None
+    for index, candidate in enumerate(candidates, start=1):
+        print(f"[{index}/{len(candidates)}] {candidate.as_dict()}", flush=True)
+        result = run_llama_server_eval(
+            model,
+            candidate,
+            llama_server=llama_server,
+            prompt=args.prompt,
+            max_tokens=args.max_tokens,
+            host=args.host,
+            port=args.port,
+            startup_timeout=args.startup_timeout,
+            request_timeout=args.request_timeout,
+        )
+        results.append(result)
+        if result.health_ok and result.chat_ok and (best is None or result.generation_tps > best.generation_tps):
+            best = result
+        print(
+            "  "
+            f"health_ok={result.health_ok} chat_ok={result.chat_ok} "
+            f"generation_tps={result.generation_tps:.3f} latency_seconds={result.latency_seconds:.3f}"
+        )
+
+    write_jsonl(run_dir / "server.jsonl", [result.as_dict() for result in results])
+    if best is None:
+        raise RuntimeError(f"all server candidates failed; see {run_dir / 'server.jsonl'}")
+
+    server_best = run_dir / "server-best.json"
+    server_best.write_text(json.dumps(best.as_dict(), indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    print(f"best_generation_tps={best.generation_tps:.3f}")
+    print(f"best_profile={server_best}")
     return 0
 
 
