@@ -122,6 +122,52 @@ class CliTests(TestCase):
             self.assertEqual(len(list((root / "runs").rglob("server.jsonl"))), 1)
             self.assertEqual(len(list((root / "runs").rglob("server-best.json"))), 1)
 
+    def test_drill_command_uses_source_profile_and_writes_server_artifacts(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            model = root / "model.gguf"
+            model.write_text("fake", encoding="utf-8")
+            source = root / "source-server-best.json"
+            source.write_text(json.dumps({"candidate": candidate_payload()}), encoding="utf-8")
+            result = ServerEvalResult(
+                candidate=candidate_payload(),
+                command=["llama-server", "-m", str(model)],
+                returncode=-15,
+                latency_seconds=1.0,
+                health_ok=True,
+                chat_ok=True,
+                metrics={"generation_tps": 42.0, "prompt_tps": 100.0},
+                response={"id": "chatcmpl"},
+                stderr="",
+            )
+
+            stdout = io.StringIO()
+            with (
+                patch("llama_gguf_tune.cli.require_llama_server", return_value="/bin/llama-server"),
+                patch("llama_gguf_tune.cli.run_llama_server_eval", return_value=result),
+                contextlib.redirect_stdout(stdout),
+            ):
+                exit_code = main(
+                    [
+                        "drill",
+                        str(model),
+                        "--runs-dir",
+                        str(root / "runs"),
+                        "--source-profile",
+                        str(source),
+                        "--limit",
+                        "2",
+                        "--repetitions",
+                        "2",
+                    ]
+                )
+
+            self.assertEqual(exit_code, 0)
+            self.assertIn("source_profile=", stdout.getvalue())
+            self.assertIn("best_generation_tps=42.000", stdout.getvalue())
+            self.assertEqual(len(list((root / "runs").rglob("server.jsonl"))), 1)
+            self.assertEqual(len(list((root / "runs").rglob("server-best.json"))), 1)
+
 
 def make_run(root: Path, model_stem: str, generation_tps: float, timestamp: str = "20260428T000000Z") -> None:
     run_dir = root / model_stem / timestamp
@@ -134,3 +180,17 @@ def make_run(root: Path, model_stem: str, generation_tps: float, timestamp: str 
         "run": {"power": {"source": "Battery Power", "powermode": {"Battery Power": 1}}},
     }
     (run_dir / "run.jsonl").write_text(json.dumps(record) + "\n", encoding="utf-8")
+
+
+def candidate_payload() -> dict[str, object]:
+    return {
+        "threads": 9,
+        "batch_threads": 9,
+        "batch_size": 1024,
+        "ubatch_size": 512,
+        "flash_attn": True,
+        "mmap": True,
+        "ctx_size": 4096,
+        "cache_type_k": "f16",
+        "cache_type_v": "f16",
+    }

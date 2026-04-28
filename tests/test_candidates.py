@@ -1,6 +1,13 @@
 from unittest import TestCase
 
-from llama_gguf_tune.candidates import Candidate, build_candidates, default_candidates, select_candidates
+from llama_gguf_tune.candidates import (
+    Candidate,
+    build_candidates,
+    candidate_from_dict,
+    default_candidates,
+    drill_candidates,
+    select_candidates,
+)
 
 
 class CandidateTests(TestCase):
@@ -93,3 +100,28 @@ class CandidateTests(TestCase):
 
         self.assertEqual(len({tuple(candidate.bench_args()) for candidate in bench}), len(bench))
         self.assertEqual(len({tuple(candidate.server_args()) for candidate in server}), len(server))
+
+    def test_drill_candidates_start_with_seed_and_mutate_neighbors(self) -> None:
+        seed = Candidate(
+            threads=9,
+            batch_threads=9,
+            batch_size=1024,
+            ubatch_size=512,
+            flash_attn=True,
+            mmap=True,
+            ctx_size=4096,
+            cache_type_k="f16",
+            cache_type_v="f16",
+        )
+
+        candidates = drill_candidates(seed, 18, limit=10)
+
+        self.assertEqual(candidates[0], seed)
+        self.assertEqual(len(candidates), 10)
+        self.assertEqual(len({tuple(candidate.server_args()) for candidate in candidates}), len(candidates))
+        self.assertTrue(any(candidate.flash_attn is False for candidate in candidates))
+        self.assertTrue(all(candidate.ubatch_size <= candidate.batch_size for candidate in candidates))
+
+    def test_candidate_from_dict_rejects_missing_profile_fields(self) -> None:
+        with self.assertRaises(RuntimeError):
+            candidate_from_dict({"threads": 1})

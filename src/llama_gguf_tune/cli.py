@@ -7,7 +7,8 @@ import sys
 from pathlib import Path
 
 from .bench import create_run_dir, require_llama_bench, run_llama_bench, write_best_profile, write_jsonl
-from .candidates import preset_names, select_candidates
+from .candidates import drill_candidates, preset_names, select_candidates
+from .drill import latest_server_profile, load_profile_candidate, mark_drill_metadata
 from .evals import discover_run_dirs, format_eval_table, select_latest_run_dirs, summarize_runs
 from .models import find_gguf_models, human_size
 from .run_metadata import capture_run_metadata, write_run_metadata
@@ -60,6 +61,21 @@ def build_parser() -> argparse.ArgumentParser:
     server_eval.add_argument("--host", default="127.0.0.1")
     server_eval.add_argument("--port", type=int, default=None)
     server_eval.set_defaults(func=cmd_server_eval)
+
+    drill = subparsers.add_parser("drill", help="refine runtime flags around the latest server winner")
+    drill.add_argument("model", type=Path)
+    drill.add_argument("--runs-dir", type=Path, default=Path("tuning-runs"))
+    drill.add_argument("--llama-server", dest="llama_server", default=None)
+    drill.add_argument("--source-profile", type=Path, default=None, help="server-best.json to drill from")
+    drill.add_argument("--limit", type=int, default=16, help="maximum neighbor candidates to run")
+    drill.add_argument("--repetitions", type=int, default=3, help="requests to run per candidate")
+    drill.add_argument("--prompt", default="Reply with one concise sentence about local inference tuning.")
+    drill.add_argument("--max-tokens", type=int, default=64)
+    drill.add_argument("--startup-timeout", type=float, default=120.0)
+    drill.add_argument("--request-timeout", type=float, default=60.0)
+    drill.add_argument("--host", default="127.0.0.1")
+    drill.add_argument("--port", type=int, default=None)
+    drill.set_defaults(func=cmd_drill)
 
     profile = subparsers.add_parser("profile", help="print the latest saved best profile for a model")
     profile.add_argument("model", type=Path)
@@ -187,6 +203,80 @@ def cmd_server_eval(args: argparse.Namespace) -> int:
     write_jsonl(run_dir / "server.jsonl", [result.as_dict() for result in results])
     if best is None:
         raise RuntimeError(f"all server candidates failed; see {run_dir / 'server.jsonl'}")
+
+    server_best = run_dir / "server-best.json"
+    server_best.write_text(json.dumps(best.as_dict(), indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    print(f"best_generation_tps={best.generation_tps:.3f}")
+    print(f"best_profile={server_best}")
+    return 0
+
+
+def cmd_drill(args: argparse.Namespace) -> int:
+    model = args.model.expanduser().resolve()
+    if not model.is_file():
+        raise RuntimeError(f"model not found: {model}")
+    if model.suffix.lower() != ".gguf":
+        raise RuntimeError(f"expected a .gguf model: {model}")
+    if args.repetitions < 1:
+        raise RuntimeError("--repetitions must be at least 1")
+    if args.limit < 1:
+        raise RuntimeError("--limit must be at least 1")
+
+    runs_dir = args.runs_dir.expanduser().resolve()
+    source_profile = (
+        args.source_profile.expanduser().resolve()
+        if args.source_profile is not None
+        else latest_server_profile(runs_dir, model)
+    )
+    seed = load_profile_candidate(source_profile)
+    llama_server = require_llama_server(args.llama_server)
+    logical_cpus = os.cpu_count() or 1
+    candidates = drill_candidates(seed, logical_cpus, limit=args.limit)
+    run_dir = create_run_dir(runs_dir, model)
+    run_metadata = mark_drill_metadata(
+        capture_run_metadata(),
+        source_profile=source_profile,
+        source_candidate=seed,
+    )
+    write_run_metadata(run_dir, run_metadata)
+    print(f"run_dir={run_dir}")
+    print(f"source_profile={source_profile}")
+    print(f"seed={seed.as_dict()}")
+    print(f"candidates={len(candidates)}")
+    print(f"repetitions={args.repetitions}")
+
+    results = []
+    best = None
+    for index, candidate in enumerate(candidates, start=1):
+        print(f"[{index}/{len(candidates)}] {candidate.as_dict()}", flush=True)
+        repetitions = [
+            run_llama_server_eval(
+                model,
+                candidate,
+                llama_server=llama_server,
+                prompt=args.prompt,
+                max_tokens=args.max_tokens,
+                host=args.host,
+                port=args.port,
+                startup_timeout=args.startup_timeout,
+                request_timeout=args.request_timeout,
+                run_metadata=run_metadata,
+            )
+            for _ in range(args.repetitions)
+        ]
+        result = aggregate_repetition_results(repetitions)
+        results.append(result)
+        if result.health_ok and result.chat_ok and (best is None or result.generation_tps > best.generation_tps):
+            best = result
+        print(
+            "  "
+            f"health_ok={result.health_ok} chat_ok={result.chat_ok} "
+            f"generation_tps={result.generation_tps:.3f} latency_seconds={result.latency_seconds:.3f}"
+        )
+
+    write_jsonl(run_dir / "server.jsonl", [result.as_dict() for result in results])
+    if best is None:
+        raise RuntimeError(f"all drill candidates failed; see {run_dir / 'server.jsonl'}")
 
     server_best = run_dir / "server-best.json"
     server_best.write_text(json.dumps(best.as_dict(), indent=2, sort_keys=True) + "\n", encoding="utf-8")

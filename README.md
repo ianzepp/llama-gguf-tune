@@ -63,6 +63,12 @@ llama-gguf-tune server-eval ./model.gguf --limit 2 --repetitions 5 --max-tokens 
 llama-gguf-tune server-eval ./model.gguf --preset thorough --limit 24 --repetitions 3
 ```
 
+Drill into the latest `server-eval` winner for a model:
+
+```sh
+llama-gguf-tune drill ./model.gguf --limit 16 --repetitions 3 --max-tokens 64
+```
+
 Write artifacts to a specific directory:
 
 ```sh
@@ -143,6 +149,11 @@ evals.
 hostname, platform, CPU count, `pmset` power source, battery status, and
 Battery/AC `powermode` values when available.
 
+`drill` records the source `server-best.json` and seed candidate in run metadata,
+then tests nearest-neighbor runtime args around that winner. It starts with the
+seed, then varies threads, batch threads, batch/microbatch shape, flash
+attention, mmap, context size, and KV cache types in a bounded order.
+
 Power context is stored as provenance. Use it to spot trends, but prefer
 repeated server evals and artifact-kind filtering before drawing conclusions:
 
@@ -156,4 +167,4 @@ llama-gguf-tune eval ./tuning-runs --kind server --latest
 - Multiple hardware presets: Metal, CPU, CUDA, ROCm.
 - Draft-model speculative decoding profiles.
 - Hugging Face repo and quant discovery.
-- Agent loop that proposes bounded candidate matrices.
+- Agent loop that proposes bounded candidate matrices from drill results.

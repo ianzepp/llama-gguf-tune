@@ -155,6 +155,124 @@ def select_candidates(logical_cpus: int, *, preset: PresetName, kind: CandidateK
     return selected
 
 
+def candidate_from_dict(payload: dict[str, object]) -> Candidate:
+    try:
+        return Candidate(
+            threads=positive_int(payload["threads"], "threads"),
+            batch_threads=positive_int(payload["batch_threads"], "batch_threads"),
+            batch_size=positive_int(payload["batch_size"], "batch_size"),
+            ubatch_size=positive_int(payload["ubatch_size"], "ubatch_size"),
+            flash_attn=bool(payload["flash_attn"]),
+            mmap=bool(payload["mmap"]),
+            ctx_size=positive_int(payload["ctx_size"], "ctx_size"),
+            cache_type_k=string_value(payload["cache_type_k"], "cache_type_k"),
+            cache_type_v=string_value(payload["cache_type_v"], "cache_type_v"),
+        )
+    except KeyError as exc:
+        raise RuntimeError(f"profile candidate is missing {exc.args[0]}") from exc
+
+
+def drill_candidates(seed: Candidate, logical_cpus: int, *, limit: int) -> list[Candidate]:
+    """Build a nearest-neighbor server tuning pass around a known-good candidate."""
+    if limit < 1:
+        raise RuntimeError("--limit must be at least 1")
+
+    options: list[Candidate] = [seed]
+    options.append(replace_candidate(seed, flash_attn=not seed.flash_attn))
+
+    for threads in nearby_thread_values(seed.threads, logical_cpus):
+        options.append(replace_candidate(seed, threads=threads, batch_threads=min(seed.batch_threads, threads)))
+        options.append(replace_candidate(seed, threads=threads, batch_threads=threads))
+
+    for batch_threads in nearby_thread_values(seed.batch_threads, logical_cpus):
+        options.append(replace_candidate(seed, batch_threads=batch_threads))
+
+    for batch_size in nearby_batch_values(seed.batch_size):
+        options.append(replace_candidate(seed, batch_size=batch_size, ubatch_size=min(seed.ubatch_size, batch_size)))
+
+    for ubatch_size in nearby_ubatch_values(seed.ubatch_size):
+        if ubatch_size <= seed.batch_size:
+            options.append(replace_candidate(seed, ubatch_size=ubatch_size))
+
+    for batch_size in nearby_batch_values(seed.batch_size):
+        for ubatch_size in nearby_ubatch_values(seed.ubatch_size):
+            if ubatch_size <= batch_size:
+                options.append(replace_candidate(seed, batch_size=batch_size, ubatch_size=ubatch_size))
+
+    options.append(replace_candidate(seed, mmap=not seed.mmap))
+
+    for ctx_size in nearby_context_values(seed.ctx_size):
+        options.append(replace_candidate(seed, ctx_size=ctx_size))
+
+    for cache_type_k, cache_type_v in nearby_cache_type_pairs(seed.cache_type_k, seed.cache_type_v):
+        options.append(replace_candidate(seed, cache_type_k=cache_type_k, cache_type_v=cache_type_v))
+
+    return dedupe_candidates(options)[:limit]
+
+
+def replace_candidate(seed: Candidate, **changes: object) -> Candidate:
+    values = seed.as_dict()
+    values.update(changes)
+    return candidate_from_dict(values)
+
+
+def dedupe_candidates(candidates: list[Candidate]) -> list[Candidate]:
+    selected: list[Candidate] = []
+    seen: set[tuple[str, ...]] = set()
+    for candidate in candidates:
+        if candidate.ubatch_size > candidate.batch_size:
+            continue
+        key = tuple(candidate.server_args())
+        if key in seen:
+            continue
+        seen.add(key)
+        selected.append(candidate)
+    return selected
+
+
+def nearby_thread_values(value: int, logical_cpus: int) -> list[int]:
+    step = max(1, logical_cpus // 6)
+    return unique(
+        [
+            value,
+            max(1, value - step),
+            min(logical_cpus, value + step),
+            max(1, logical_cpus // 3),
+            max(1, logical_cpus // 2),
+            max(1, (logical_cpus * 2) // 3),
+            logical_cpus,
+        ]
+    )
+
+
+def nearby_batch_values(value: int) -> list[int]:
+    return unique([value, 512, 1024, 2048, 4096])
+
+
+def nearby_ubatch_values(value: int) -> list[int]:
+    return unique([value, 128, 256, 512, 1024])
+
+
+def nearby_context_values(value: int) -> list[int]:
+    return unique([value, 2048, 4096, 8192, 16384])
+
+
+def nearby_cache_type_pairs(cache_type_k: str, cache_type_v: str) -> list[tuple[str, str]]:
+    return unique_pairs([(cache_type_k, cache_type_v), ("f16", "f16"), ("q8_0", "q8_0")])
+
+
+def positive_int(value: object, name: str) -> int:
+    if not isinstance(value, int) or value < 1:
+        raise RuntimeError(f"profile candidate has invalid {name}: {value!r}")
+    return value
+
+
+def string_value(value: object, name: str) -> str:
+    if not isinstance(value, str) or not value:
+        raise RuntimeError(f"profile candidate has invalid {name}: {value!r}")
+    return value
+
+
 def build_preset(logical_cpus: int, preset: PresetName) -> CandidatePreset:
     half = max(1, logical_cpus // 2)
     third = max(1, logical_cpus // 3)
@@ -203,6 +321,17 @@ def build_preset(logical_cpus: int, preset: PresetName) -> CandidatePreset:
 def unique(values: list[int]) -> list[int]:
     seen: set[int] = set()
     result: list[int] = []
+    for value in values:
+        if value in seen:
+            continue
+        seen.add(value)
+        result.append(value)
+    return result
+
+
+def unique_pairs(values: list[tuple[str, str]]) -> list[tuple[str, str]]:
+    seen: set[tuple[str, str]] = set()
+    result: list[tuple[str, str]] = []
     for value in values:
         if value in seen:
             continue
