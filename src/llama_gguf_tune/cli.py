@@ -7,7 +7,7 @@ import sys
 from pathlib import Path
 
 from .bench import create_run_dir, require_llama_bench, run_llama_bench, write_best_profile, write_jsonl
-from .candidates import default_candidates
+from .candidates import preset_names, select_candidates
 from .evals import discover_run_dirs, format_eval_table, select_latest_run_dirs, summarize_runs
 from .models import find_gguf_models, human_size
 from .run_metadata import capture_run_metadata, write_run_metadata
@@ -40,6 +40,7 @@ def build_parser() -> argparse.ArgumentParser:
     bench.add_argument("--runs-dir", type=Path, default=Path("tuning-runs"))
     bench.add_argument("--llama-bench", dest="llama_bench", default=None)
     bench.add_argument("--limit", type=int, default=12, help="maximum candidates to run")
+    bench.add_argument("--preset", choices=preset_names(), default="standard", help="candidate matrix depth")
     bench.add_argument("--repetitions", type=int, default=3)
     bench.add_argument("--prompt-tokens", type=int, default=512)
     bench.add_argument("--gen-tokens", type=int, default=128)
@@ -50,6 +51,7 @@ def build_parser() -> argparse.ArgumentParser:
     server_eval.add_argument("--runs-dir", type=Path, default=Path("tuning-runs"))
     server_eval.add_argument("--llama-server", dest="llama_server", default=None)
     server_eval.add_argument("--limit", type=int, default=4, help="maximum candidates to run")
+    server_eval.add_argument("--preset", choices=preset_names(), default="standard", help="candidate matrix depth")
     server_eval.add_argument("--repetitions", type=int, default=1, help="requests to run per candidate")
     server_eval.add_argument("--prompt", default="Reply with one concise sentence about local inference tuning.")
     server_eval.add_argument("--max-tokens", type=int, default=64)
@@ -94,13 +96,14 @@ def cmd_bench(args: argparse.Namespace) -> int:
 
     llama_bench = require_llama_bench(args.llama_bench)
     logical_cpus = os.cpu_count() or 1
-    candidates = default_candidates(logical_cpus)[: args.limit]
+    candidates = select_candidates(logical_cpus, preset=args.preset, kind="bench", limit=args.limit)
     if args.repetitions < 1:
         raise RuntimeError("--repetitions must be at least 1")
     run_dir = create_run_dir(args.runs_dir.expanduser().resolve(), model)
     run_metadata = capture_run_metadata()
     write_run_metadata(run_dir, run_metadata)
     print(f"run_dir={run_dir}")
+    print(f"preset={args.preset}")
     print(f"candidates={len(candidates)}")
     print(f"repetitions={args.repetitions}")
 
@@ -141,13 +144,14 @@ def cmd_server_eval(args: argparse.Namespace) -> int:
 
     llama_server = require_llama_server(args.llama_server)
     logical_cpus = os.cpu_count() or 1
-    candidates = default_candidates(logical_cpus)[: args.limit]
+    candidates = select_candidates(logical_cpus, preset=args.preset, kind="server", limit=args.limit)
     if args.repetitions < 1:
         raise RuntimeError("--repetitions must be at least 1")
     run_dir = create_run_dir(args.runs_dir.expanduser().resolve(), model)
     run_metadata = capture_run_metadata()
     write_run_metadata(run_dir, run_metadata)
     print(f"run_dir={run_dir}")
+    print(f"preset={args.preset}")
     print(f"candidates={len(candidates)}")
     print(f"repetitions={args.repetitions}")
 

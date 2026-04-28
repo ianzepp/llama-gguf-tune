@@ -17,6 +17,7 @@ class EvalResult:
     best_generation_tps: float
     best_prompt_tps: float
     best_candidate: dict[str, Any]
+    best_runtime_args: list[str]
     run_context: dict[str, Any]
 
     def as_dict(self) -> dict[str, Any]:
@@ -30,6 +31,7 @@ class EvalResult:
             "best_generation_tps": self.best_generation_tps,
             "best_prompt_tps": self.best_prompt_tps,
             "best_candidate": self.best_candidate,
+            "best_runtime_args": self.best_runtime_args,
             "run_context": self.run_context,
         }
 
@@ -76,11 +78,13 @@ def load_eval_result(run_dir: Path, artifact_kind: str = "auto") -> EvalResult:
         best_generation_tps = record_generation_tps(best)
         best_prompt_tps = record_prompt_tps(best)
         best_candidate = candidate_from_record(best)
+        best_runtime_args = runtime_args_from_record(best)
     else:
         best = records[0]
         best_generation_tps = 0.0
         best_prompt_tps = 0.0
         best_candidate = candidate_from_record(best)
+        best_runtime_args = runtime_args_from_record(best)
 
     return EvalResult(
         run_dir=run_dir,
@@ -92,6 +96,7 @@ def load_eval_result(run_dir: Path, artifact_kind: str = "auto") -> EvalResult:
         best_generation_tps=best_generation_tps,
         best_prompt_tps=best_prompt_tps,
         best_candidate=best_candidate,
+        best_runtime_args=best_runtime_args,
         run_context=run_context_from_record(best),
     )
 
@@ -149,7 +154,7 @@ def record_successful(record: dict[str, Any]) -> bool:
 
 
 def format_eval_table(results: list[EvalResult]) -> str:
-    headers = ["kind", "model", "decode tok/s", "prompt tok/s", "success", "failed", "ctx", "best candidate", "run"]
+    headers = ["kind", "model", "decode tok/s", "prompt tok/s", "success", "failed", "ctx", "best args", "run"]
     rows = [
         [
             result.artifact_kind,
@@ -159,12 +164,18 @@ def format_eval_table(results: list[EvalResult]) -> str:
             f"{result.successful_candidates}/{result.total_candidates}",
             str(result.failed_candidates),
             format_run_context(result.run_context),
-            format_candidate(result.best_candidate),
+            format_best_args(result.best_runtime_args, result.best_candidate),
             str(result.run_dir),
         ]
         for result in results
     ]
     return format_table(headers, rows)
+
+
+def format_best_args(runtime_args: list[str], candidate: dict[str, Any]) -> str:
+    if runtime_args:
+        return " ".join(runtime_args)
+    return format_candidate(candidate)
 
 
 def format_candidate(candidate: dict[str, Any]) -> str:
@@ -218,6 +229,13 @@ def metric_float(record: dict[str, Any], name: str) -> float:
 def candidate_from_record(record: dict[str, Any]) -> dict[str, Any]:
     candidate = record.get("candidate")
     return dict(candidate) if isinstance(candidate, dict) else {}
+
+
+def runtime_args_from_record(record: dict[str, Any]) -> list[str]:
+    runtime_args = record.get("runtime_args")
+    if not isinstance(runtime_args, list):
+        return []
+    return [str(value) for value in runtime_args]
 
 
 def run_context_from_record(record: dict[str, Any]) -> dict[str, Any]:

@@ -35,6 +35,7 @@ class ServerEvalResult:
     def as_dict(self) -> dict[str, Any]:
         return {
             "candidate": self.candidate,
+            "runtime_args": runtime_args_from_candidate(self.candidate),
             "command": self.command,
             "returncode": self.returncode,
             "latency_seconds": self.latency_seconds,
@@ -72,22 +73,7 @@ def build_server_command(
         llama_server,
         "-m",
         str(model_path),
-        "-t",
-        str(candidate.threads),
-        "-tb",
-        str(candidate.batch_threads),
-        "-b",
-        str(candidate.batch_size),
-        "-ub",
-        str(candidate.ubatch_size),
-        "-fa",
-        "on" if candidate.flash_attn else "off",
-        "-c",
-        str(candidate.ctx_size),
-        "-ctk",
-        candidate.cache_type_k,
-        "-ctv",
-        candidate.cache_type_v,
+        *candidate.server_args(),
         "--host",
         host,
         "--port",
@@ -96,7 +82,6 @@ def build_server_command(
         "1",
         "--metrics",
     ]
-    command.append("--mmap" if candidate.mmap else "--no-mmap")
     return command
 
 
@@ -213,6 +198,31 @@ def aggregate_repetition_results(results: list[ServerEvalResult]) -> ServerEvalR
 
 def mean(values: list[float]) -> float:
     return sum(values) / len(values)
+
+
+def runtime_args_from_candidate(candidate: dict[str, Any]) -> list[str]:
+    if not candidate:
+        return []
+    args = [
+        "-t",
+        str(candidate.get("threads")),
+        "-tb",
+        str(candidate.get("batch_threads")),
+        "-b",
+        str(candidate.get("batch_size")),
+        "-ub",
+        str(candidate.get("ubatch_size")),
+        "-fa",
+        "on" if candidate.get("flash_attn") else "off",
+        "-c",
+        str(candidate.get("ctx_size")),
+        "-ctk",
+        str(candidate.get("cache_type_k")),
+        "-ctv",
+        str(candidate.get("cache_type_v")),
+    ]
+    args.append("--mmap" if candidate.get("mmap") else "--no-mmap")
+    return args
 
 
 def wait_for_health(host: str, port: int, timeout: float) -> bool:

@@ -109,6 +109,7 @@ class EvalTests(TestCase):
             best_generation_tps=12.3456,
             best_prompt_tps=99.9,
             best_candidate={"threads": 6, "flash_attn": True},
+            best_runtime_args=[],
             run_context={"power": {"source": "Battery Power", "powermode": {"Battery Power": 1}}},
         )
 
@@ -122,6 +123,26 @@ class EvalTests(TestCase):
         self.assertIn("1", table)
         self.assertIn("threads=6", table)
         self.assertIn("flash_attn=True", table)
+
+    def test_format_eval_table_prefers_recorded_runtime_args(self) -> None:
+        result = EvalResult(
+            run_dir=Path("/tmp/run"),
+            model_name="model.gguf",
+            artifact_kind="server",
+            total_candidates=1,
+            successful_candidates=1,
+            failed_candidates=0,
+            best_generation_tps=12.0,
+            best_prompt_tps=99.0,
+            best_candidate={"threads": 6, "flash_attn": True},
+            best_runtime_args=["-t", "6", "-fa", "on"],
+            run_context={},
+        )
+
+        table = format_eval_table([result])
+
+        self.assertIn("-t 6 -fa on", table)
+        self.assertNotIn("threads=6", table)
 
 
 def make_run(root: Path, model_stem: str, generation_tps: float) -> Path:
@@ -148,6 +169,7 @@ def record(
         "command": ["llama-bench", "-m", model],
         "returncode": returncode,
         "candidate": candidate,
+        "runtime_args": ["-t", str(candidate.get("threads", 0))] if candidate else [],
         "metrics": {
             "generation_tps": generation_tps,
             "prompt_tps": prompt_tps,
@@ -171,6 +193,7 @@ def server_record(
         "health_ok": health_ok,
         "chat_ok": chat_ok,
         "candidate": candidate,
+        "runtime_args": ["-t", str(candidate.get("threads", 0))] if candidate else [],
         "metrics": {
             "generation_tps": generation_tps,
             "prompt_tps": prompt_tps,

@@ -29,6 +29,7 @@ class BenchResult:
     def as_dict(self) -> dict[str, Any]:
         return {
             "candidate": self.candidate.as_dict(),
+            "runtime_args": self.candidate.bench_args(),
             "command": self.command,
             "returncode": self.returncode,
             "stdout": self.stdout,
@@ -138,6 +139,7 @@ def write_best_profile(
     profile = {
         "model": str(model_path),
         "candidate": best.candidate.as_dict(),
+        "runtime_args": best.candidate.bench_args(),
         "metrics": best.metrics,
         "command": best.command,
         "environment": run_metadata

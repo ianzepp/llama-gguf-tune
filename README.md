@@ -52,6 +52,7 @@ Run a small benchmark matrix:
 
 ```sh
 llama-gguf-tune bench /Volumes/ai/models/Qwen3.6-35B-A3B-GGUF/Qwen3.6-35B-A3B-UD-Q4_K_M.gguf
+llama-gguf-tune bench ./model.gguf --preset quick --limit 8
 ```
 
 Run temporary `llama-server` request evals:
@@ -59,6 +60,7 @@ Run temporary `llama-server` request evals:
 ```sh
 llama-gguf-tune server-eval ./model.gguf
 llama-gguf-tune server-eval ./model.gguf --limit 2 --repetitions 5 --max-tokens 32
+llama-gguf-tune server-eval ./model.gguf --preset thorough --limit 24 --repetitions 3
 ```
 
 Write artifacts to a specific directory:
@@ -84,7 +86,13 @@ llama-gguf-tune eval ./tuning-runs --json
 
 ## What Gets Tuned
 
-Initial matrix dimensions:
+Preset depth:
+
+- `quick`: short smoke pass over likely-fast thread, batch, microbatch, and flash-attention combinations.
+- `standard`: broader default pass for normal iteration.
+- `thorough`: deeper pass that also includes mmap off, larger context, and KV cache type variants.
+
+Initial runtime dimensions:
 
 - `-t`, `--threads`
 - `-tb`, batch threads
@@ -95,6 +103,10 @@ Initial matrix dimensions:
 - `-c`, context size
 - `-ctk`, KV cache K type
 - `-ctv`, KV cache V type
+
+`bench` and `server-eval` share candidate definitions, but they emit only the
+runtime args supported by the underlying binary. For example, `llama-server`
+gets `-tb`, while current `llama-bench` builds may not expose that flag.
 
 ## What Does Not Happen
 
@@ -118,11 +130,12 @@ tuning-runs/
 ```
 
 The profile contains the model path, runtime flags, benchmark summary, and the
-exact command used.
+exact command used. New records also store `runtime_args` separately from the
+full command so the winning llama.cpp flags are easy to lift into a wrapper.
 
 `llama-gguf-tune eval` reads those artifacts back and ranks runs by decode
 tokens per second, including success counts, failed candidate counts, prompt
-throughput, and the winning candidate flags. It can read both `run.jsonl`
+throughput, and the winning runtime args. It can read both `run.jsonl`
 from `llama-bench` and `server.jsonl` from temporary `llama-server` request
 evals.
 
@@ -139,7 +152,6 @@ llama-gguf-tune eval ./tuning-runs --kind server --latest
 
 ## Roadmap
 
-- `llama-server` request benchmarks against temporary ports.
 - Promotion to generated wrapper scripts.
 - Multiple hardware presets: Metal, CPU, CUDA, ROCm.
 - Draft-model speculative decoding profiles.
