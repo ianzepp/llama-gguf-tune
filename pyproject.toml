@@ -1,0 +1,37 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "llama-gguf-tune"
+version = "0.1.0"
+description = "Inference autotuning for local GGUF models."
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+authors = [
+  { name = "Ian Zepp", email = "ian.zepp@protonmail.com" }
+]
+keywords = ["llama.cpp", "gguf", "benchmark", "autotune", "local-ai"]
+classifiers = [
+  "Development Status :: 2 - Pre-Alpha",
+  "Environment :: Console",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.11",
+  "Topic :: Scientific/Engineering :: Artificial Intelligence",
+  "Topic :: System :: Benchmark",
+]
+dependencies = []
+
+[project.urls]
+Homepage = "https://github.com/ianzepp/llama-gguf-tune"
+Issues = "https://github.com/ianzepp/llama-gguf-tune/issues"
+
+[project.scripts]
+llama-gguf-tune = "llama_gguf_tune.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
